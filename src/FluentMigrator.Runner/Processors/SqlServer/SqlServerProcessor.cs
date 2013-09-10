@@ -28,6 +28,9 @@ namespace FluentMigrator.Runner.Processors.SqlServer
 {
     public sealed class SqlServerProcessor : GenericProcessorBase
     {
+
+        private bool isInSingleUserMode = false;
+
         public override string DatabaseType
         {
             get { return "SqlServer"; }
@@ -148,7 +151,6 @@ namespace FluentMigrator.Runner.Processors.SqlServer
             if (sql.IndexOf("GO", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 ExecuteBatchNonQuery(sql);
-
             }
             else
             {
@@ -231,6 +233,34 @@ namespace FluentMigrator.Runner.Processors.SqlServer
 
             if (expression.Operation != null)
                 expression.Operation(Connection, Transaction);
+        }
+
+        protected override void EnsureConnectionIsOpen()
+        {
+            if (Connection.State != ConnectionState.Open)
+            {
+                Connection.Open();
+                if (Options.ProviderSwitches.Contains("SingleUserMode") && !isInSingleUserMode)
+                {
+                    Announcer.Say("Entering Single User Mode");
+                    Process("declare @sql varchar(100);set @sql='alter database '+quotename(db_name())+' SET SINGLE_USER WITH ROLLBACK IMMEDIATE'; exec(@sql)");
+                    isInSingleUserMode = true;
+                }
+            }
+        }
+
+        protected override void EnsureConnectionIsClosed()
+        {
+            if (Connection.State != ConnectionState.Closed)
+            {
+                if (Connection.State == ConnectionState.Open && Options.ProviderSwitches.Contains("SingleUserMode") && isInSingleUserMode)
+                {
+                    Announcer.Say("Exiting Single User Mode");
+                    Process("declare @sql varchar(100);set @sql='alter database '+quotename(db_name())+' SET MULTI_USER'; exec(@sql)");
+                    isInSingleUserMode = false;
+                }
+                Connection.Close();
+            }
         }
     }
 }
